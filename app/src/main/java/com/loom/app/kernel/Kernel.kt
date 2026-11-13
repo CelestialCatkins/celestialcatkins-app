@@ -230,7 +230,8 @@ class Kernel(private val app: Context) {
                 } catch (t: Throwable) {
                     lp.rollback()
                     lp.status = Status.ERROR
-                    lp.error = short(t)
+                    lp.error = ErrorText.summary(t)
+                    lp.errorDetail = ErrorText.full(t)
                     Log.w("Loom", "activate ${lp.id} failed", t)
                 }
             }
@@ -267,6 +268,7 @@ class Kernel(private val app: Context) {
         return LoadedPlugin(m, dir).apply {
             status = Status.ERROR
             error = message
+            errorDetail = message
         }
     }
 
@@ -374,11 +376,6 @@ class Kernel(private val app: Context) {
         override fun effect(undo: Runnable, label: String?) {
             lp.add { undo.run() }
         }
-    }
-
-    private fun short(t: Throwable): String {
-        val m = t.message ?: t.javaClass.simpleName
-        return if (m.length > 220) m.take(220) + "…" else m
     }
 
     // ------------------------------------------------------------ 运行期

@@ -224,12 +224,18 @@ ctx.composeScreen("摘要台", "code", MyScreen())
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | 插件出现在列表但 `PENDING` | `inject` 里的服务没有提供者 | 把提供者装上；详情页会列出缺什么 |
+| `PENDING` 但提供者明明在列表里 | 提供者自身 `ERROR`，服务没有注册成功 | 先修提供者；列表会写「提供者 X 加载失败」 |
 | `ERROR: 目录层级与 layer 不一致` | zip 里的 layer 与放置目录不符 | 重装；让宿主按 manifest 决定目录 |
 | `ERROR: 服务名已被占用` | 同名服务被另一个插件先注册 | 改服务名，或先停用另一个 |
 | `ERROR: 架构违规` | 逻辑层注入了 UI 层服务 | 把服务下沉到逻辑层 |
 | `ERROR: DEX 来源未受信` | sha256 不在白名单 | 插件详情页点"信任这个来源" |
 | 运行台没有标签 | 没有 ACTIVE 的 UI 插件 | 检查 `screen` 字段与 `screen.lua`，或 DEX 插件是否注册了界面 |
 | `ERROR: Compose ABI 不匹配` | 插件 Compose 版本与宿主不同 | 用同版本 Compose 重编，或改用 `viewScreen` |
+
+**求助 AI**：`ERROR` / `PENDING` 的插件行与详情页都有「复制错误给 AI」。复制内容是：
+宿主与项目概要、插件清单、完整错误（含 cause 链）、缺失依赖的实际提供者状态、`plugin.json`、
+入口脚本与 `screen.lua` 原文。选中 `PENDING` 插件时会自动附带它缺失服务的提供者，便于一起修。
+修好后按第 8 节的 `@@LOOM-FILE` 格式输出，即可粘贴导入。
 
 ---
 

@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.loom.app.AppState
@@ -49,6 +50,7 @@ import com.loom.app.ui.Segmented
 import com.loom.app.ui.StatusChip
 import com.loom.app.ui.TagChip
 import com.loom.app.ui.VSpace
+import com.loom.app.ui.copyText
 import com.loom.app.ui.theme.Loom
 import com.loom.app.ui.theme.LoomType
 import com.loom.app.ui.theme.R
@@ -71,6 +73,23 @@ fun PluginsScreen(state: AppState) {
     var confirmUninstall by remember { mutableStateOf<String?>(null) }
     var sourceOf by remember { mutableStateOf<String?>(null) }
     var pasteOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val appVersion = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "?"
+    }
+
+    /** 一键把诊断写进剪贴板：清单 + 错误原文 + 相关源码，AI 拿到就能改。 */
+    fun copyDiagnostics(targets: List<LoadedPlugin>) {
+        if (targets.isEmpty()) return
+        val text = PluginDiagnostics.build(kernel, targets, appVersion)
+        val ok = copyText(context, "Loom 插件诊断", text)
+        state.show(
+            if (ok) "诊断已复制（${targets.size} 个插件，${text.length} 字符），可直接粘贴给 AI"
+            else "复制失败：剪贴板不可用"
+        )
+    }
 
     if (project == null) {
         Column(
@@ -120,6 +139,7 @@ fun PluginsScreen(state: AppState) {
                     detail = null
                     sourceOf = id
                 },
+                onCopy = { copyDiagnostics(listOf(lp)) },
             )
         }
     }
@@ -190,6 +210,19 @@ fun PluginsScreen(state: AppState) {
                         "${Status.DISABLED.code} ${kernel.count(Status.DISABLED)}",
                     modifier = Modifier.weight(1f),
                 )
+                val troubled = all.filter {
+                    it.status == Status.ERROR || it.status == Status.PENDING || !it.error.isNullOrBlank()
+                }
+                if (troubled.isNotEmpty()) {
+                    Text(
+                        "复制问题",
+                        style = LoomType.small,
+                        color = Loom.colors.accent,
+                        modifier = Modifier
+                            .clickable { copyDiagnostics(troubled) }
+                            .padding(horizontal = Sp.x2, vertical = Sp.x2),
+                    )
+                }
                 Text(
                     "刷新",
                     style = LoomType.small,
@@ -227,6 +260,7 @@ fun PluginsScreen(state: AppState) {
                     state = state,
                     lp = lp,
                     onOpen = { detail = lp.id },
+                    onCopy = { copyDiagnostics(listOf(lp)) },
                 )
                 Hairline()
             }
@@ -247,7 +281,12 @@ fun PluginsScreen(state: AppState) {
 }
 
 @Composable
-private fun PluginRow(state: AppState, lp: LoadedPlugin, onOpen: () -> Unit) {
+private fun PluginRow(
+    state: AppState,
+    lp: LoadedPlugin,
+    onOpen: () -> Unit,
+    onCopy: () -> Unit,
+) {
     val c = Loom.colors
     val kernel = state.kernel
     Column(
@@ -286,7 +325,13 @@ private fun PluginRow(state: AppState, lp: LoadedPlugin, onOpen: () -> Unit) {
         if (lp.missing.isNotEmpty()) {
             VSpace(Sp.x2)
             Text(
-                "缺少依赖：" + lp.missing.joinToString("、") + "（提供者未装载）",
+                "缺少依赖：" + lp.missing.joinToString("、") { service ->
+                    val failed = kernel.plugins.values.firstOrNull {
+                        it.status == Status.ERROR && it.manifest.provides.contains(service)
+                    }
+                    if (failed != null) "$service（提供者 ${failed.id} 加载失败）"
+                    else "$service（提供者未装载）"
+                },
                 style = LoomType.micro,
                 color = c.warn,
             )
@@ -294,6 +339,15 @@ private fun PluginRow(state: AppState, lp: LoadedPlugin, onOpen: () -> Unit) {
         if (!lp.error.isNullOrBlank()) {
             VSpace(Sp.x2)
             Text(lp.error ?: "", style = LoomType.micro, color = c.danger)
+        }
+        if (lp.status != Status.ACTIVE || !lp.error.isNullOrBlank()) {
+            VSpace(2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                CopyChip(
+                    if (!lp.error.isNullOrBlank()) "复制错误给 AI" else "复制依赖问题给 AI",
+                    onCopy,
+                )
+            }
         }
         VSpace(Sp.x2)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -320,6 +374,7 @@ private fun PluginDetail(
     onDismiss: () -> Unit,
     onUninstall: () -> Unit,
     onSource: () -> Unit,
+    onCopy: () -> Unit,
 ) {
     val c = Loom.colors
     val kernel = state.kernel
@@ -348,6 +403,25 @@ private fun PluginDetail(
                     Text(lp.error ?: "", style = LoomType.small, color = c.danger)
                 }
             }
+            if (lp.status == Status.PENDING && lp.error.isNullOrBlank()) {
+                VSpace(Sp.x3)
+                ToneBox(c.warnSoft) {
+                    Text(
+                        "依赖 " + lp.missing.joinToString("、") + " 未就绪，插件代码尚未装载；补齐提供者后会自动激活。",
+                        style = LoomType.small,
+                        color = c.warn,
+                    )
+                }
+            }
+            if (lp.status != Status.ACTIVE || !lp.error.isNullOrBlank()) {
+                VSpace(Sp.x2)
+                LoomButton(
+                    if (!lp.error.isNullOrBlank()) "复制错误给 AI" else "复制依赖问题给 AI",
+                    BtnStyle.Secondary,
+                    "export",
+                    onClick = onCopy,
+                )
+            }
 
             VSpace(Sp.x4)
             SectionHeader(null, "依赖")
@@ -357,10 +431,16 @@ private fun PluginDetail(
             } else {
                 lp.manifest.inject.forEach { service ->
                     val owner = kernel.services.ownerOf(service)
+                    val declared = kernel.plugins.values.filter { it.manifest.provides.contains(service) }
+                    val label = when {
+                        owner != null -> "← $owner"
+                        declared.isNotEmpty() -> declared.joinToString("、") { "${it.id}（${it.status.code}）" }
+                        else -> "缺失"
+                    }
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                         Text(service, style = LoomType.mono, color = c.ink, modifier = Modifier.weight(1f))
                         Text(
-                            if (owner != null) "← $owner" else "缺失",
+                            label,
                             style = LoomType.mono,
                             color = if (owner != null) c.ok else c.warn,
                         )
@@ -498,6 +578,20 @@ private fun permissionText(p: String): String = when (p) {
     "sensors" -> "sensors：读取传感器"
     "clipboard" -> "clipboard：读写剪贴板"
     else -> p
+}
+
+@Composable
+private fun CopyChip(text: String, onClick: () -> Unit) {
+    val c = Loom.colors
+    Text(
+        text,
+        style = LoomType.micro,
+        color = c.accent,
+        modifier = Modifier
+            .clip(RoundedCornerShape(R.pill))
+            .clickable(onClick = onClick)
+            .padding(horizontal = Sp.x3, vertical = 6.dp),
+    )
 }
 
 @Composable

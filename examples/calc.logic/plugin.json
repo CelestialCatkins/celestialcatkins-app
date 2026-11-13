@@ -1,0 +1,13 @@
+{
+  "id": "calc.logic",
+  "name": "计算器内核",
+  "version": "1.0.2",
+  "layer": "logic",
+  "kind": "business",
+  "author": "Loom 示例",
+  "description": "两操作数计算器：维护输入与运算状态，暴露 calc 服务，并订阅 calc.press.* 意图事件。",
+  "inject": [],
+  "provides": ["calc"],
+  "permissions": ["storage"],
+  "entry": "source/main.lua"
+}

@@ -81,13 +81,15 @@ plugin-api/                   DEX 插件契约（插件作者只依赖这个模�
 1. 打开应用 → 工作台是空的（这是设计，不是 bug）。
 2. `创建项目` → 输入名字。
 3. 进 `插件` 页 → `粘贴导入`，把 AI 给出的 `@@LOOM-FILE` 文本整段粘进去（1.1 起，推荐）。
-   - 也可以 `导入插件包` 选一个 zip；没有现成的？用 `examples/` 里的：先 `bash examples/build-zips.sh` 打出 4 个 zip。
-   - 建议顺序：`kv.logic.zip` → `counter.logic.zip` → `panel.ui.zip` → `note.ui.zip`。
+   - 也可以 `导入插件包` 选一个 zip；没有现成的？用 `examples/` 里的：先 `bash examples/build-zips.sh` 打出示例 zip。
+   - 建议顺序：`kv.logic.zip` → `counter.logic.zip` → `panel.ui.zip` → `note.ui.zip`；计算器示例是 `calc.logic.zip` → `calc.ui.zip`。
 4. 回 `项目` 页 → `运行项目` → 进运行台点按钮。
 5. 去 `图谱` 页看关系图长出来；再切 `运行链条` 看事件因果链。
 6. `项目` 页底部 `导出 .loomproj`，换台设备导入即可复原。
 
 插件声明了依赖但提供者没装时，它会停在 `PENDING` 并列出缺什么 —— 回插件页把缺的装上就会自动激活。
+
+出错时不用手抄日志：`ERROR` / `PENDING` 的行和详情页都有「复制错误给 AI」。它会把插件清单、完整错误（含 Lua traceback）、缺失依赖的提供者，以及入口/界面脚本原文一起写进剪贴板，直接粘给 AI 即可。
 
 ---
 

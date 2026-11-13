@@ -1,0 +1,13 @@
+{
+  "id": "calc.ui",
+  "name": "计算器",
+  "version": "1.0.2",
+  "layer": "ui",
+  "author": "Loom 示例",
+  "description": "计算器面板：显示 calc 服务的结果，按键只发 calc.press.* 意图。",
+  "inject": ["calc"],
+  "provides": [],
+  "permissions": [],
+  "entry": "source/main.lua",
+  "screen": "source/screen.lua"
+}

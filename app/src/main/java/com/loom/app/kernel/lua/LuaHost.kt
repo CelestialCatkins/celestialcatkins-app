@@ -2,6 +2,7 @@ package com.loom.app.kernel.lua
 
 import android.util.Log
 import com.loom.app.kernel.EventBus
+import com.loom.app.kernel.ErrorText
 import com.loom.app.kernel.Json
 import com.loom.app.kernel.Kernel
 import com.loom.app.kernel.LoadedPlugin
@@ -9,12 +10,15 @@ import com.loom.app.kernel.ServiceBus
 import org.json.JSONArray
 import org.json.JSONObject
 import org.luaj.vm2.Globals
+import org.luaj.vm2.LoadState
 import org.luaj.vm2.LuaTable
 import org.luaj.vm2.LuaValue
+import org.luaj.vm2.compiler.LuaC
 import org.luaj.vm2.lib.BaseLib
 import org.luaj.vm2.lib.CoroutineLib
 import org.luaj.vm2.lib.MathLib
 import org.luaj.vm2.lib.OneArgFunction
+import org.luaj.vm2.lib.PackageLib
 import org.luaj.vm2.lib.StringLib
 import org.luaj.vm2.lib.TableLib
 import org.luaj.vm2.lib.ThreeArgFunction
@@ -26,7 +30,8 @@ import java.io.File
  *
  * 能力白名单：
  *  - 只用 Base / Table / String / Math / Coroutine 库；
- *  - 不加载 io / os / package / debug，也不加载 luajava 绑定；
+ *  - 不加载 io / os / debug，也不加载 luajava 绑定；
+ *  - package 只在初始化标准库时短暂存在（它们要写 package.loaded），之后与 require 一起从全局摘掉；
  *  - dofile / loadfile / load / require / print 全部被替换或移除；
  *  - 脚本只能经 ctx 表访问内核：服务、事件、项目存储、自己的 state。
  *
@@ -47,7 +52,7 @@ class LuaHost(
         val entry = File(plugin.dir, plugin.manifest.entry)
         if (entry.exists()) {
             val chunk = globals.load(entry.readText(), "@" + plugin.manifest.entry)
-            chunk.call(ctx)
+            callChunk(chunk, plugin.manifest.entry)
         } else if (!plugin.manifest.isUi) {
             throw IllegalStateException("缺少入口文件 " + plugin.manifest.entry)
         }
@@ -57,7 +62,7 @@ class LuaHost(
             val sf = File(plugin.dir, screenPath)
             if (!sf.exists()) throw IllegalStateException("UI 插件缺少 " + screenPath)
             val chunk = globals.load(sf.readText(), "@" + screenPath)
-            val table = chunk.call(ctx)
+            val table = callChunk(chunk, screenPath)
             if (!table.istable()) throw IllegalStateException(screenPath + " 必须 return 一个界面表")
             plugin.screenFn = chunk
             val json = tableToJson(table.checktable())
@@ -71,24 +76,51 @@ class LuaHost(
     /** 每次渲染都重新求值：界面永远读当下真实状态，不做缓存。 */
     fun renderScreen(): JSONObject? {
         val fn = plugin.screenFn ?: return null
-        val t = fn.call(ctx)
-        return if (t.istable()) tableToJson(t.checktable()) else null
+        return try {
+            val t = fn.call(ctx)
+            if (t.istable()) tableToJson(t.checktable()) else null
+        } catch (t: Throwable) {
+            plugin.error = "渲染界面失败：" + ErrorText.summary(t)
+            plugin.errorDetail = "渲染界面失败：" + ErrorText.full(t)
+            Log.w("LoomLua", plugin.id + " render failed", t)
+            null
+        }
+    }
+
+    /**
+     * 执行一个 chunk，并把「哪个文件」写进错误里。
+     * LuaJ 的原始信息常常只有一句 "attempt to index ? (a nil value)"，
+     * 不说是哪个文件；这里补上路径，复制给 AI 时才可定位。
+     */
+    private fun callChunk(chunk: LuaValue, path: String): LuaValue = try {
+        chunk.call(ctx)
+    } catch (t: Throwable) {
+        throw IllegalStateException("执行 $path 失败：" + ErrorText.summary(t), t)
     }
 
     // ------------------------------------------------------------ 沙箱
 
     private fun newGlobals(): Globals {
         val g = Globals()
+        // 顺序不能变：Table/String/Math/Coroutine 这些标准库在装载时会写
+        // package.loaded，所以必须先有 PackageLib，否则第一个库就会抛
+        // "attempt to index ? (a nil value)"，所有 Lua 插件都会停在 ERROR。
         g.load(BaseLib())
+        g.load(PackageLib())
         g.load(TableLib())
         g.load(StringLib())
         g.load(MathLib())
         g.load(CoroutineLib())
+        // 纯 Globals 默认没有编译器；不装 LuaC，globals.load 会报 "No compiler."
+        LoadState.install(g)
+        LuaC.install(g)
+        // 沙箱：package / require 只在初始化标准库时用到，之后从全局摘掉。
+        g.set("package", LuaValue.NIL)
+        g.set("require", LuaValue.NIL)
+        g.set("module", LuaValue.NIL)
         g.set("dofile", LuaValue.NIL)
         g.set("loadfile", LuaValue.NIL)
         g.set("load", LuaValue.NIL)
-        g.set("require", LuaValue.NIL)
-        g.set("package", LuaValue.NIL)
         g.set("print", object : OneArgFunction() {
             override fun call(arg: LuaValue): LuaValue {
                 Log.d("LoomLua", plugin.id + ": " + arg.tojstring())
@@ -208,7 +240,8 @@ class LuaHost(
             block()
             kernel.persistState(plugin)
         } catch (t: Throwable) {
-            plugin.error = what + " 失败：" + (t.message ?: t.javaClass.simpleName)
+            plugin.error = what + " 失败：" + ErrorText.summary(t)
+            plugin.errorDetail = what + " 失败：" + ErrorText.full(t)
             Log.w("LoomLua", plugin.id + " " + what, t)
             kernel.notifyChanged()
         }

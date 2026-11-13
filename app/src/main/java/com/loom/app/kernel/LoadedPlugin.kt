@@ -18,7 +18,10 @@ class LoadedPlugin(
     }
 
     var status: Status = Status.PENDING
+    /** 列表里显示的短错误（首行，最多几百字符）。 */
     var error: String? = null
+    /** 完整错误：cause 链 + Lua traceback，供「复制给 AI」使用。 */
+    var errorDetail: String? = null
     val missing = ArrayList<String>()
     val effects = ArrayList<Effect>()
     val state = JSONObject()
@@ -76,6 +79,7 @@ class LoadedPlugin(
         .put("kind", manifest.kind?.key ?: "")
         .put("status", status.code)
         .put("error", error ?: "")
+        .put("errorDetail", errorDetail ?: "")
         .put("missing", Json.array(missing))
         .put("inject", Json.array(manifest.inject))
         .put("provides", Json.array(manifest.provides))
